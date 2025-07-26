@@ -32,8 +32,11 @@ public class XRayPlugin : BasePlugin
         // Register event handlers for cleanup when players disconnect
         RegisterEventHandler<EventPlayerDisconnect>(OnPlayerDisconnect);
         
-        // Add periodic timer to maintain X-Ray effects
-        AddTimer(0.1f, UpdateXRayEffects, CounterStrikeSharp.API.Modules.Timers.TimerFlags.REPEAT);
+        // Use multiple timer frequencies for better responsiveness
+        AddTimer(0.05f, UpdateXRayEffects, CounterStrikeSharp.API.Modules.Timers.TimerFlags.REPEAT);
+        
+        // Also try to hook into player movement/update events
+        RegisterListener<Listeners.OnTick>(OnGameTick);
     }
 
     [GameEventHandler]
@@ -50,6 +53,21 @@ public class XRayPlugin : BasePlugin
 
     // Periodic update to maintain X-Ray effects
     private void UpdateXRayEffects()
+    {
+        ApplyXRayGlowEffects();
+    }
+
+    // Game tick listener for real-time X-Ray updates
+    private void OnGameTick()
+    {
+        // Apply X-Ray effects every tick for maximum responsiveness
+        if (_xrayActivePlayers.Count > 0)
+        {
+            ApplyXRayGlowEffects();
+        }
+    }
+
+    private void ApplyXRayGlowEffects()
     {
         if (_xrayActivePlayers.Count == 0)
             return;
@@ -227,20 +245,28 @@ public class XRayPlugin : BasePlugin
 
         var pawn = targetPlayer.PlayerPawn.Value;
         
-        // Configure glow properties for maximum visibility like spectator X-Ray
-        pawn.Glow.GlowColorOverride = Color.FromArgb(255, 255, 0, 0); // Bright red
-        pawn.Glow.GlowType = 1; // Try type 1 for better visibility (was 3)
-        pawn.Glow.GlowTeam = -1; // Make visible to all teams
-        pawn.Glow.GlowRange = 0; // Unlimited range
+        // Try the most aggressive glow configuration possible
+        pawn.Glow.GlowColorOverride = Color.FromArgb(255, 255, 0, 0); // Pure red, maximum alpha
+        pawn.Glow.GlowType = 0; // Try type 0 first (basic glow)
+        pawn.Glow.GlowTeam = -1; // Visible to all teams
+        pawn.Glow.GlowRange = 99999; // Maximum range
         pawn.Glow.GlowRangeMin = 0; // No minimum range
         pawn.Glow.Glowing = true; // Enable the glow
-        pawn.Glow.Flashing = true; // Enable flashing for better visibility
+        pawn.Glow.Flashing = true; // Enable flashing for maximum visibility
         pawn.Glow.EligibleForScreenHighlight = true; // Enable screen highlighting
-        pawn.Glow.GlowTime = 999999.0f; // Very long glow time
-        pawn.Glow.GlowStartTime = Server.CurrentTime; // Set start time
+        pawn.Glow.GlowTime = 999999.0f; // Maximum glow time
+        pawn.Glow.GlowStartTime = Server.CurrentTime; // Current time
         
-        // Mark the glow property as changed for network transmission
+        // Force multiple network updates
         Utilities.SetStateChanged(pawn, "CBaseModelEntity", "m_Glow");
+        
+        // Try to force immediate network synchronization
+        Server.NextFrame(() => {
+            if (pawn.IsValid)
+            {
+                Utilities.SetStateChanged(pawn, "CBaseModelEntity", "m_Glow");
+            }
+        });
     }
 
     private void RemoveAllXRayEffects()
