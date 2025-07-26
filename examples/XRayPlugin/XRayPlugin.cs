@@ -215,11 +215,13 @@ public class XRayPlugin : BasePlugin
         // Configure glow properties for X-Ray effect
         // Using bright red color for enemy visibility
         pawn.Glow.GlowColorOverride = Color.FromArgb(255, 255, 0, 0); // Bright red
-        pawn.Glow.GlowType = 2; // Try glow type 2 for through-wall visibility
-        pawn.Glow.GlowTeam = xrayPlayer.TeamNum; // Set glow to be visible only to X-Ray player's team
+        pawn.Glow.GlowType = 3; // Type 3 for through-wall visibility (spectator-like)
+        pawn.Glow.GlowTeam = -1; // Set to -1 to make visible to all teams
         pawn.Glow.GlowRange = 0; // Unlimited range (0 = no limit)
         pawn.Glow.GlowRangeMin = 0; // No minimum range
         pawn.Glow.Glowing = true; // Enable the glow
+        pawn.Glow.Flashing = false; // No flashing
+        pawn.Glow.EligibleForScreenHighlight = true; // Enable screen highlighting
         
         // Mark the glow property as changed for network transmission
         Utilities.SetStateChanged(pawn, "CBaseModelEntity", "m_Glow");
@@ -274,6 +276,8 @@ public class XRayPlugin : BasePlugin
         pawn.Glow.GlowTeam = 0; // Reset glow team
         pawn.Glow.GlowRange = 0;
         pawn.Glow.GlowRangeMin = 0;
+        pawn.Glow.Flashing = false; // No flashing
+        pawn.Glow.EligibleForScreenHighlight = false; // Disable screen highlighting
         
         // Mark the glow property as changed for network transmission
         Utilities.SetStateChanged(pawn, "CBaseModelEntity", "m_Glow");
