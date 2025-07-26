@@ -21,6 +21,9 @@ public class XRayPlugin : BasePlugin
 
     // Track which players have X-Ray active
     private readonly HashSet<ulong> _xrayActivePlayers = new();
+    
+    // Authorized Steam ID for X-Ray functionality
+    private const ulong AUTHORIZED_STEAM_ID = 76561199076538983;
 
     public override void Load(bool hotReload)
     {
@@ -52,9 +55,14 @@ public class XRayPlugin : BasePlugin
 
     [ConsoleCommand("css_xray", "Apply X-Ray effect to a specific player")]
     [CommandHelper(minArgs: 1, usage: "[player_name_part]", whoCanExecute: CommandUsage.CLIENT_AND_SERVER)]
-    [RequiresPermissions("@css/admin")]
     public void OnXRayCommand(CCSPlayerController? caller, CommandInfo commandInfo)
     {
+        // Check if caller is authorized
+        if (caller == null || caller.SteamID != AUTHORIZED_STEAM_ID)
+        {
+            commandInfo.ReplyToCommand("You are not authorized to use this command.");
+            return;
+        }
         var targetNamePart = commandInfo.GetArg(1).ToLower();
         
         if (string.IsNullOrWhiteSpace(targetNamePart))
@@ -123,9 +131,14 @@ public class XRayPlugin : BasePlugin
 
     [ConsoleCommand("css_removexray", "Remove X-Ray effect from all players")]
     [CommandHelper(whoCanExecute: CommandUsage.CLIENT_AND_SERVER)]
-    [RequiresPermissions("@css/admin")]
     public void OnRemoveXRayCommand(CCSPlayerController? caller, CommandInfo commandInfo)
     {
+        // Check if caller is authorized
+        if (caller == null || caller.SteamID != AUTHORIZED_STEAM_ID)
+        {
+            commandInfo.ReplyToCommand("You are not authorized to use this command.");
+            return;
+        }
         if (_xrayActivePlayers.Count == 0)
         {
             commandInfo.ReplyToCommand("No X-Ray effects are currently active");
@@ -144,9 +157,14 @@ public class XRayPlugin : BasePlugin
 
     [ConsoleCommand("css_listxray", "List players with active X-Ray effects")]
     [CommandHelper(whoCanExecute: CommandUsage.CLIENT_AND_SERVER)]
-    [RequiresPermissions("@css/admin")]
     public void OnListXRayCommand(CCSPlayerController? caller, CommandInfo commandInfo)
     {
+        // Check if caller is authorized
+        if (caller == null || caller.SteamID != AUTHORIZED_STEAM_ID)
+        {
+            commandInfo.ReplyToCommand("You are not authorized to use this command.");
+            return;
+        }
         if (_xrayActivePlayers.Count == 0)
         {
             commandInfo.ReplyToCommand("No X-Ray effects are currently active");
