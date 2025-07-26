@@ -31,6 +31,9 @@ public class XRayPlugin : BasePlugin
         
         // Register event handlers for cleanup when players disconnect
         RegisterEventHandler<EventPlayerDisconnect>(OnPlayerDisconnect);
+        
+        // Add periodic timer to maintain X-Ray effects
+        AddTimer(0.1f, UpdateXRayEffects, CounterStrikeSharp.API.Modules.Timers.TimerFlags.REPEAT);
     }
 
     [GameEventHandler]
@@ -43,6 +46,41 @@ public class XRayPlugin : BasePlugin
             _xrayActivePlayers.Remove(player.SteamID);
         }
         return HookResult.Continue;
+    }
+
+    // Periodic update to maintain X-Ray effects
+    private void UpdateXRayEffects()
+    {
+        if (_xrayActivePlayers.Count == 0)
+            return;
+
+        var allPlayers = Utilities.GetPlayers();
+
+        foreach (var xrayPlayer in allPlayers)
+        {
+            if (!xrayPlayer.IsValid || xrayPlayer.PlayerPawn.Value == null)
+                continue;
+
+            if (!_xrayActivePlayers.Contains(xrayPlayer.SteamID))
+                continue;
+
+            var xrayTeam = (CsTeam)xrayPlayer.TeamNum;
+
+            // Apply glow to enemies for this X-Ray player
+            foreach (var enemyPlayer in allPlayers)
+            {
+                if (!enemyPlayer.IsValid || enemyPlayer.PlayerPawn.Value == null || enemyPlayer == xrayPlayer)
+                    continue;
+
+                var enemyTeam = (CsTeam)enemyPlayer.TeamNum;
+                
+                // Only highlight opposing team members
+                if (IsOpposingTeam(xrayTeam, enemyTeam))
+                {
+                    ApplyXRayGlow(enemyPlayer);
+                }
+            }
+        }
     }
 
     public override void Unload(bool hotReload)
@@ -110,7 +148,6 @@ public class XRayPlugin : BasePlugin
         if (_xrayActivePlayers.Contains(steamId))
         {
             // Remove X-Ray instead of showing error - toggle functionality
-            RemoveXRayForPlayer(targetPlayer);
             _xrayActivePlayers.Remove(steamId);
             
             var callerNameRemove = caller?.PlayerName ?? "Console";
@@ -119,7 +156,6 @@ public class XRayPlugin : BasePlugin
             return;
         }
 
-        ApplyXRayEffect(targetPlayer);
         _xrayActivePlayers.Add(steamId);
         
         var callerName = caller?.PlayerName ?? "Console";
@@ -145,7 +181,6 @@ public class XRayPlugin : BasePlugin
             return;
         }
 
-        RemoveAllXRayEffects();
         _xrayActivePlayers.Clear();
         
         var callerName = caller?.PlayerName ?? "Console";
@@ -178,26 +213,6 @@ public class XRayPlugin : BasePlugin
         commandInfo.ReplyToCommand($"Players with active X-Ray: {playerList}");
     }
 
-    private void ApplyXRayEffect(CCSPlayerController targetPlayer)
-    {
-        var targetTeam = (CsTeam)targetPlayer.TeamNum;
-        var allPlayers = Utilities.GetPlayers();
-
-        foreach (var player in allPlayers)
-        {
-            if (player.PlayerPawn.Value == null || player == targetPlayer)
-                continue;
-
-            var playerTeam = (CsTeam)player.TeamNum;
-            
-            // Only apply glow to opposing team members
-            if (IsOpposingTeam(targetTeam, playerTeam))
-            {
-                ApplyGlowToPlayer(player, targetPlayer);
-            }
-        }
-    }
-
     private bool IsOpposingTeam(CsTeam team1, CsTeam team2)
     {
         // Check if teams are opposing (T vs CT)
@@ -205,23 +220,24 @@ public class XRayPlugin : BasePlugin
                (team1 == CsTeam.CounterTerrorist && team2 == CsTeam.Terrorist);
     }
 
-    private void ApplyGlowToPlayer(CCSPlayerController player, CCSPlayerController xrayPlayer)
+    private void ApplyXRayGlow(CCSPlayerController targetPlayer)
     {
-        if (player.PlayerPawn.Value == null)
+        if (targetPlayer.PlayerPawn.Value == null)
             return;
 
-        var pawn = player.PlayerPawn.Value;
+        var pawn = targetPlayer.PlayerPawn.Value;
         
-        // Configure glow properties for X-Ray effect
-        // Using bright red color for enemy visibility
+        // Configure glow properties for maximum visibility like spectator X-Ray
         pawn.Glow.GlowColorOverride = Color.FromArgb(255, 255, 0, 0); // Bright red
-        pawn.Glow.GlowType = 3; // Type 3 for through-wall visibility (spectator-like)
-        pawn.Glow.GlowTeam = -1; // Set to -1 to make visible to all teams
-        pawn.Glow.GlowRange = 0; // Unlimited range (0 = no limit)
+        pawn.Glow.GlowType = 1; // Try type 1 for better visibility (was 3)
+        pawn.Glow.GlowTeam = -1; // Make visible to all teams
+        pawn.Glow.GlowRange = 0; // Unlimited range
         pawn.Glow.GlowRangeMin = 0; // No minimum range
         pawn.Glow.Glowing = true; // Enable the glow
-        pawn.Glow.Flashing = false; // No flashing
+        pawn.Glow.Flashing = true; // Enable flashing for better visibility
         pawn.Glow.EligibleForScreenHighlight = true; // Enable screen highlighting
+        pawn.Glow.GlowTime = 999999.0f; // Very long glow time
+        pawn.Glow.GlowStartTime = Server.CurrentTime; // Set start time
         
         // Mark the glow property as changed for network transmission
         Utilities.SetStateChanged(pawn, "CBaseModelEntity", "m_Glow");
@@ -237,26 +253,6 @@ public class XRayPlugin : BasePlugin
                 continue;
 
             RemoveGlowFromPlayer(player);
-        }
-    }
-
-    private void RemoveXRayForPlayer(CCSPlayerController targetPlayer)
-    {
-        var targetTeam = (CsTeam)targetPlayer.TeamNum;
-        var allPlayers = Utilities.GetPlayers();
-
-        foreach (var player in allPlayers)
-        {
-            if (player.PlayerPawn.Value == null || player == targetPlayer)
-                continue;
-
-            var playerTeam = (CsTeam)player.TeamNum;
-            
-            // Remove glow from opposing team members
-            if (IsOpposingTeam(targetTeam, playerTeam))
-            {
-                RemoveGlowFromPlayer(player);
-            }
         }
     }
 
@@ -276,8 +272,10 @@ public class XRayPlugin : BasePlugin
         pawn.Glow.GlowTeam = 0; // Reset glow team
         pawn.Glow.GlowRange = 0;
         pawn.Glow.GlowRangeMin = 0;
-        pawn.Glow.Flashing = false; // No flashing
-        pawn.Glow.EligibleForScreenHighlight = false; // Disable screen highlighting
+        pawn.Glow.Flashing = false;
+        pawn.Glow.EligibleForScreenHighlight = false;
+        pawn.Glow.GlowTime = 0.0f;
+        pawn.Glow.GlowStartTime = 0.0f;
         
         // Mark the glow property as changed for network transmission
         Utilities.SetStateChanged(pawn, "CBaseModelEntity", "m_Glow");
