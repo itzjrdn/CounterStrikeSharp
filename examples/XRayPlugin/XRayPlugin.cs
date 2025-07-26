@@ -193,7 +193,7 @@ public class XRayPlugin : BasePlugin
             // Only apply glow to opposing team members
             if (IsOpposingTeam(targetTeam, playerTeam))
             {
-                ApplyGlowToPlayer(player);
+                ApplyGlowToPlayer(player, targetPlayer);
             }
         }
     }
@@ -205,7 +205,7 @@ public class XRayPlugin : BasePlugin
                (team1 == CsTeam.CounterTerrorist && team2 == CsTeam.Terrorist);
     }
 
-    private void ApplyGlowToPlayer(CCSPlayerController player)
+    private void ApplyGlowToPlayer(CCSPlayerController player, CCSPlayerController xrayPlayer)
     {
         if (player.PlayerPawn.Value == null)
             return;
@@ -215,7 +215,8 @@ public class XRayPlugin : BasePlugin
         // Configure glow properties for X-Ray effect
         // Using bright red color for enemy visibility
         pawn.Glow.GlowColorOverride = Color.FromArgb(255, 255, 0, 0); // Bright red
-        pawn.Glow.GlowType = 3; // Glow type 3 should work through walls (like spectator X-ray)
+        pawn.Glow.GlowType = 1; // Try glow type 1 instead of 3 for better live player visibility
+        pawn.Glow.GlowTeam = xrayPlayer.TeamNum; // Set glow to be visible only to X-Ray player's team
         pawn.Glow.GlowRange = 0; // Unlimited range (0 = no limit)
         pawn.Glow.GlowRangeMin = 0; // No minimum range
         pawn.Glow.Glowing = true; // Enable the glow
@@ -270,6 +271,7 @@ public class XRayPlugin : BasePlugin
         // Reset glow properties to default values
         pawn.Glow.GlowColorOverride = Color.FromArgb(255, 255, 255, 255); // White
         pawn.Glow.GlowType = 0; // Default glow type
+        pawn.Glow.GlowTeam = 0; // Reset glow team
         pawn.Glow.GlowRange = 0;
         pawn.Glow.GlowRangeMin = 0;
         
