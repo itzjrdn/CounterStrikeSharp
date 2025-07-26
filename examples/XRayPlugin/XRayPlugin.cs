@@ -15,7 +15,7 @@ namespace XRayPlugin;
 public class XRayPlugin : BasePlugin
 {
     public override string ModuleName => "X-Ray Plugin";
-    public override string ModuleVersion => "2.0.0";
+    public override string ModuleVersion => "3.0.0";
     public override string ModuleAuthor => "CounterStrikeSharp & Contributors";
     public override string ModuleDescription => "A plugin that provides X-Ray functionality for admins - highlights enemies with glow effect through walls";
 
@@ -29,20 +29,49 @@ public class XRayPlugin : BasePlugin
     {
         Console.WriteLine("X-Ray Plugin loaded!");
         
-        // Register event handlers
+        // Register event handlers for proper X-Ray management
         RegisterEventHandler<EventPlayerDisconnect>(OnPlayerDisconnect);
-        
-        // Use timer for constant X-Ray effect updates
-        AddTimer(0.1f, UpdateXRayEffects, CounterStrikeSharp.API.Modules.Timers.TimerFlags.REPEAT);
+        RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
+        RegisterEventHandler<EventRoundStart>(OnRoundStart);
+        RegisterEventHandler<EventPlayerTeam>(OnPlayerTeam);
         
         Console.WriteLine("X-Ray Plugin: Event handlers registered successfully!");
     }
 
-    // Update X-Ray effects using direct player glow
-    private void UpdateXRayEffects()
+    // Event-driven X-Ray updates instead of constant timer
+    [GameEventHandler]
+    public HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo info)
+    {
+        // Update X-Ray effects when players spawn
+        Server.NextFrame(() => UpdateXRayForAllPlayers());
+        return HookResult.Continue;
+    }
+
+    [GameEventHandler]
+    public HookResult OnRoundStart(EventRoundStart @event, GameEventInfo info)
+    {
+        // Update X-Ray effects at round start
+        Server.NextFrame(() => UpdateXRayForAllPlayers());
+        return HookResult.Continue;
+    }
+
+    [GameEventHandler]
+    public HookResult OnPlayerTeam(EventPlayerTeam @event, GameEventInfo info)
+    {
+        // Update X-Ray effects when players change teams
+        Server.NextFrame(() => UpdateXRayForAllPlayers());
+        return HookResult.Continue;
+    }
+
+    // Update X-Ray effects only when needed (event-driven)
+    private void UpdateXRayForAllPlayers()
     {
         if (_xrayActivePlayers.Count == 0)
+        {
+            // No X-Ray active, ensure all glows are cleared
+            ClearAllGlowEffects();
             return;
+        }
 
         var allPlayers = Utilities.GetPlayers();
 
@@ -66,23 +95,18 @@ public class XRayPlugin : BasePlugin
                 {
                     ApplyXRayGlow(enemyPlayer);
                 }
-                else
-                {
-                    // Remove glow from same team players
-                    RemoveGlowFromPlayer(enemyPlayer);
-                }
             }
         }
+    }
 
-        // Remove glow from all players if no X-Ray is active
-        if (_xrayActivePlayers.Count == 0)
+    private void ClearAllGlowEffects()
+    {
+        var allPlayers = Utilities.GetPlayers();
+        foreach (var player in allPlayers)
         {
-            foreach (var player in allPlayers)
+            if (IsPlayerValid(player))
             {
-                if (IsPlayerValid(player))
-                {
-                    RemoveGlowFromPlayer(player);
-                }
+                RemoveGlowFromPlayer(player);
             }
         }
     }
@@ -106,16 +130,17 @@ public class XRayPlugin : BasePlugin
 
         var pawn = targetPlayer.PlayerPawn.Value;
         
-        // Apply spectator-like X-Ray glow settings
-        pawn.Glow.GlowColorOverride = Color.FromArgb(255, 0, 255, 0); // Bright green like in screenshots
-        pawn.Glow.GlowType = 3; // Spectator-like X-Ray visibility through walls
+        // Optimized glow configuration for spectator-like X-Ray visibility
+        pawn.Glow.GlowColorOverride = Color.FromArgb(255, 0, 255, 0); // Bright green matching screenshots
+        pawn.Glow.GlowType = 3; // Type 3 for spectator-like through-wall visibility
         pawn.Glow.GlowTeam = -1; // Visible to all teams
-        pawn.Glow.GlowRange = 5000; // Long range
+        pawn.Glow.GlowRange = 0; // Unlimited range
         pawn.Glow.GlowRangeMin = 0; // No minimum range
         pawn.Glow.Glowing = true; // Enable the glow
         pawn.Glow.EligibleForScreenHighlight = true; // Enable screen highlighting
+        pawn.Glow.Flashing = false; // Disable flashing for stability
         
-        // Force network update
+        // Single network update instead of continuous updates
         Utilities.SetStateChanged(pawn, "CBaseModelEntity", "m_Glow");
     }
 
@@ -136,8 +161,9 @@ public class XRayPlugin : BasePlugin
         pawn.Glow.GlowRange = 0;
         pawn.Glow.GlowRangeMin = 0;
         pawn.Glow.EligibleForScreenHighlight = false;
+        pawn.Glow.Flashing = false;
         
-        // Mark the glow property as changed for network transmission
+        // Single network update instead of continuous updates
         Utilities.SetStateChanged(pawn, "CBaseModelEntity", "m_Glow");
     }
 
@@ -150,14 +176,7 @@ public class XRayPlugin : BasePlugin
     {
         Console.WriteLine("X-Ray Plugin unloaded!");
         // Clean up all effects
-        var allPlayers = Utilities.GetPlayers();
-        foreach (var player in allPlayers)
-        {
-            if (IsPlayerValid(player))
-            {
-                RemoveGlowFromPlayer(player);
-            }
-        }
+        ClearAllGlowEffects();
         _xrayActivePlayers.Clear();
     }
 
@@ -220,6 +239,9 @@ public class XRayPlugin : BasePlugin
             // Remove X-Ray instead of showing error - toggle functionality
             _xrayActivePlayers.Remove(steamId);
             
+            // Immediately remove X-Ray effects
+            Server.NextFrame(() => UpdateXRayForAllPlayers());
+            
             var callerNameRemove = caller?.PlayerName ?? "Console";
             commandInfo.ReplyToCommand($"X-Ray effect removed from player '{targetPlayer.PlayerName}' by {callerNameRemove}");
             targetPlayer.PrintToChat($"[X-Ray] X-Ray effect has been removed by {callerNameRemove}");
@@ -228,11 +250,14 @@ public class XRayPlugin : BasePlugin
 
         _xrayActivePlayers.Add(steamId);
         
+        // Immediately apply X-Ray effects
+        Server.NextFrame(() => UpdateXRayForAllPlayers());
+        
         var callerName = caller?.PlayerName ?? "Console";
         commandInfo.ReplyToCommand($"X-Ray effect applied to player '{targetPlayer.PlayerName}' by {callerName}");
         
         // Also notify the target player
-        targetPlayer.PrintToChat($"[X-Ray] X-Ray effect has been applied to you by {callerName}. Enemy players will now glow red!");
+        targetPlayer.PrintToChat($"[X-Ray] X-Ray effect has been applied to you by {callerName}. Enemy players will now glow green!");
     }
 
     [ConsoleCommand("css_removexray", "Remove X-Ray effect from all players")]
@@ -252,6 +277,9 @@ public class XRayPlugin : BasePlugin
         }
 
         _xrayActivePlayers.Clear();
+        
+        // Immediately remove all X-Ray effects
+        Server.NextFrame(() => ClearAllGlowEffects());
         
         var callerName = caller?.PlayerName ?? "Console";
         commandInfo.ReplyToCommand($"All X-Ray effects removed by {callerName}");
