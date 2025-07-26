@@ -4,6 +4,7 @@ using CounterStrikeSharp.API.Core.Attributes;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Admin;
 using CounterStrikeSharp.API.Modules.Commands;
+using CounterStrikeSharp.API.Modules.Events;
 using CounterStrikeSharp.API.Modules.Utils;
 using System.Drawing;
 using System.Linq;
@@ -24,6 +25,21 @@ public class XRayPlugin : BasePlugin
     public override void Load(bool hotReload)
     {
         Console.WriteLine("X-Ray Plugin loaded!");
+        
+        // Register event handlers for cleanup when players disconnect
+        RegisterEventHandler<EventPlayerDisconnect>(OnPlayerDisconnect);
+    }
+
+    [GameEventHandler]
+    public HookResult OnPlayerDisconnect(EventPlayerDisconnect @event, GameEventInfo info)
+    {
+        var player = @event.Userid;
+        if (player != null && player.IsValid)
+        {
+            // Remove player from X-Ray tracking when they disconnect
+            _xrayActivePlayers.Remove(player.SteamID);
+        }
+        return HookResult.Continue;
     }
 
     public override void Unload(bool hotReload)
@@ -85,7 +101,13 @@ public class XRayPlugin : BasePlugin
         var steamId = targetPlayer.SteamID;
         if (_xrayActivePlayers.Contains(steamId))
         {
-            commandInfo.ReplyToCommand($"X-Ray is already active for player '{targetPlayer.PlayerName}'");
+            // Remove X-Ray instead of showing error - toggle functionality
+            RemoveXRayForPlayer(targetPlayer);
+            _xrayActivePlayers.Remove(steamId);
+            
+            var callerNameRemove = caller?.PlayerName ?? "Console";
+            commandInfo.ReplyToCommand($"X-Ray effect removed from player '{targetPlayer.PlayerName}' by {callerNameRemove}");
+            targetPlayer.PrintToChat($"[X-Ray] X-Ray effect has been removed by {callerNameRemove}");
             return;
         }
 
@@ -194,6 +216,26 @@ public class XRayPlugin : BasePlugin
                 continue;
 
             RemoveGlowFromPlayer(player);
+        }
+    }
+
+    private void RemoveXRayForPlayer(CCSPlayerController targetPlayer)
+    {
+        var targetTeam = (CsTeam)targetPlayer.TeamNum;
+        var allPlayers = Utilities.GetPlayers();
+
+        foreach (var player in allPlayers)
+        {
+            if (player.PlayerPawn.Value == null || player == targetPlayer)
+                continue;
+
+            var playerTeam = (CsTeam)player.TeamNum;
+            
+            // Remove glow from opposing team members
+            if (IsOpposingTeam(targetTeam, playerTeam))
+            {
+                RemoveGlowFromPlayer(player);
+            }
         }
     }
 

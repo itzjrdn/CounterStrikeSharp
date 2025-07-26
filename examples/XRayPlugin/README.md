@@ -13,16 +13,20 @@ A CounterStrikeSharp plugin that provides X-Ray functionality for administrators
 ## Commands
 
 ### `/css_xray <player_name_part>`
-Applies X-Ray effect to the specified player, making enemy team members glow red and visible through walls.
+Applies or removes X-Ray effect for the specified player (toggle functionality). When applied, enemy team members glow red and are visible through walls.
 
 **Usage Examples:**
-- `/css_xray john` - Applies X-Ray to player with "john" in their name
-- `/css_xray Player123` - Applies X-Ray to player with "Player123" in their name
+- `/css_xray john` - Toggles X-Ray for player with "john" in their name
+- `/css_xray Player123` - Toggles X-Ray for player with "Player123" in their name
 
 **Requirements:**
 - `@css/admin` permission
 - Target player must be in a valid team (T/CT, not spectator)
 - Player name part must match exactly one player
+
+**Behavior:**
+- If X-Ray is not active: Applies X-Ray effect
+- If X-Ray is already active: Removes X-Ray effect
 
 ### `/css_removexray`
 Removes all active X-Ray effects from all players.
@@ -47,7 +51,15 @@ Lists all players who currently have X-Ray effects active.
 1. When X-Ray is applied to a player, all opposing team members will glow bright red
 2. The glow effect is visible through walls (similar to spectator X-Ray)
 3. Only enemies are highlighted - teammates and the target player are not affected
-4. The effect persists until manually removed or server restart
+4. The effect persists until manually removed, toggled off, or server restart
+5. Players are automatically removed from X-Ray tracking when they disconnect
+
+## Additional Features
+
+- **Toggle Functionality**: Using `/css_xray` on a player who already has X-Ray will remove it
+- **Automatic Cleanup**: Players are removed from tracking when they disconnect
+- **Smart Team Detection**: Only highlights actual opposing teams (T vs CT)
+- **Multiple Admin Commands**: Apply, remove all, list active, and toggle individual players
 
 ## Technical Details
 
@@ -68,7 +80,7 @@ Lists all players who currently have X-Ray effects active.
 - `"Multiple players found matching '<name>': <list>"` - Multiple matches found, be more specific
 - `"Player '<name>' has no valid pawn"` - Player entity is invalid
 - `"Player '<name>' is not in a valid team (T/CT)"` - Player is spectator or unassigned
-- `"X-Ray is already active for player '<name>'"` - X-Ray already applied to this player
+- `"No X-Ray effects are currently active"` - No players have X-Ray when trying to remove all
 
 ## License
 
