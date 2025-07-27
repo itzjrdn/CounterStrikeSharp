@@ -49,6 +49,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WithCheckTransmit", "..\exa
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NativeTestsPlugin", "CounterStrikeSharp.Tests.Native\NativeTestsPlugin.csproj", "{317D3A98-D5C6-40BC-9234-CDAFC033ED0F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FlyingScoutsmanPlugin", "..\examples\FlyingScoutsmanPlugin\FlyingScoutsmanPlugin.csproj", "{CCB93058-645E-416E-9EF1-985193171137}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -143,6 +145,10 @@ Global
 		{317D3A98-D5C6-40BC-9234-CDAFC033ED0F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{317D3A98-D5C6-40BC-9234-CDAFC033ED0F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{317D3A98-D5C6-40BC-9234-CDAFC033ED0F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CCB93058-645E-416E-9EF1-985193171137}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CCB93058-645E-416E-9EF1-985193171137}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CCB93058-645E-416E-9EF1-985193171137}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CCB93058-645E-416E-9EF1-985193171137}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
