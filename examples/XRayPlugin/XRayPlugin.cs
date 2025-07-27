@@ -15,9 +15,9 @@ namespace XRayPlugin;
 public class XRayPlugin : BasePlugin
 {
     public override string ModuleName => "X-Ray Plugin";
-    public override string ModuleVersion => "4.0.1";
+    public override string ModuleVersion => "4.1.0";
     public override string ModuleAuthor => "CounterStrikeSharp & Contributors";
-    public override string ModuleDescription => "A plugin that provides X-Ray functionality for admins - highlights enemies with glow effect through walls using dynamic prop entities";
+    public override string ModuleDescription => "A plugin that provides X-Ray functionality for admins - highlights enemies with health-based glow effects (green=full health, red=low health) through walls using dynamic prop entities";
 
     // Track which players have X-Ray active
     private readonly HashSet<ulong> _xrayActivePlayers = new();
@@ -104,10 +104,29 @@ public class XRayPlugin : BasePlugin
                 // Only highlight opposing team members
                 if (IsOpposingTeam(xrayTeam, enemyTeam))
                 {
-                    // Check if this enemy already has a glow entity for this X-Ray player
-                    if (!_xrayGlowEntities[xraySteamId].ContainsKey(enemySlot))
+                    // Check if this enemy already has valid glow entities for this X-Ray player
+                    bool needsNewGlow = !_xrayGlowEntities[xraySteamId].ContainsKey(enemySlot);
+                    
+                    if (!needsNewGlow)
+                    {
+                        // Verify that existing glow entities are still valid
+                        var existingGlow = _xrayGlowEntities[xraySteamId][enemySlot];
+                        if (existingGlow.Item1?.IsValid != true || existingGlow.Item2?.IsValid != true)
+                        {
+                            // Clean up invalid entities and create new ones
+                            _xrayGlowEntities[xraySteamId].Remove(enemySlot);
+                            needsNewGlow = true;
+                        }
+                    }
+                    
+                    if (needsNewGlow)
                     {
                         CreateGlowEntityForEnemy(xrayPlayer, enemyPlayer);
+                    }
+                    else
+                    {
+                        // Update the color of existing glow entities based on enemy health
+                        UpdateGlowColorForEnemy(xrayPlayer, enemyPlayer);
                     }
                 }
                 else
@@ -164,8 +183,9 @@ public class XRayPlugin : BasePlugin
         modelGlow.Spawnflags = 256u; // Don't collide with anything
         modelGlow.DispatchSpawn();
 
-        // Set up glow properties (green like in the screenshots)
-        modelGlow.Glow.GlowColorOverride = Color.FromArgb(255, 0, 255, 0); // Bright green
+        // Set up glow properties with health-based color
+        var glowColor = GetHealthBasedGlowColor(enemyPlayer);
+        modelGlow.Glow.GlowColorOverride = glowColor;
         modelGlow.Glow.GlowRange = 5000; // Long range
         modelGlow.Glow.GlowTeam = -1; // Visible to all teams
         modelGlow.Glow.GlowType = 3; // Spectator-like through-wall visibility
@@ -384,7 +404,7 @@ public class XRayPlugin : BasePlugin
         commandInfo.ReplyToCommand($"X-Ray effect applied to player '{targetPlayer.PlayerName}' by {callerName}");
         
         // Also notify the target player
-        targetPlayer.PrintToChat($"[X-Ray] X-Ray effect has been applied to you by {callerName}. Enemy players will now glow green!");
+        targetPlayer.PrintToChat($"[X-Ray] X-Ray effect has been applied to you by {callerName}. Enemy players will now glow with health-based colors (green=full health, red=low health)!");
     }
 
     [ConsoleCommand("css_removexray", "Remove X-Ray effect from all players")]
@@ -436,6 +456,47 @@ public class XRayPlugin : BasePlugin
         
         var playerList = string.Join(", ", activeXRayPlayers);
         commandInfo.ReplyToCommand($"Players with active X-Ray: {playerList}");
+    }
+
+    private void UpdateGlowColorForEnemy(CCSPlayerController xrayPlayer, CCSPlayerController enemyPlayer)
+    {
+        var xraySteamId = xrayPlayer.SteamID;
+        var enemySlot = enemyPlayer.Slot;
+
+        if (!_xrayGlowEntities.ContainsKey(xraySteamId) || !_xrayGlowEntities[xraySteamId].ContainsKey(enemySlot))
+            return;
+
+        var glowEntities = _xrayGlowEntities[xraySteamId][enemySlot];
+        var glowEntity = glowEntities.Item2; // The visible glow entity
+
+        if (glowEntity?.IsValid == true && glowEntity.Glow != null)
+        {
+            var newColor = GetHealthBasedGlowColor(enemyPlayer);
+            glowEntity.Glow.GlowColorOverride = newColor;
+        }
+    }
+
+    private Color GetHealthBasedGlowColor(CCSPlayerController player)
+    {
+        if (!IsPlayerValid(player) || player.PlayerPawn.Value == null)
+        {
+            // Default to green if we can't get health
+            return Color.FromArgb(255, 0, 255, 0);
+        }
+
+        var health = player.PlayerPawn.Value.Health;
+        var maxHealth = player.PlayerPawn.Value.MaxHealth;
+
+        // Calculate health percentage (0.0 to 1.0)
+        float healthPercentage = Math.Max(0, Math.Min(1.0f, (float)health / maxHealth));
+
+        // Interpolate between red (0% health) and green (100% health)
+        // Red: RGB(255, 0, 0), Green: RGB(0, 255, 0)
+        int red = (int)(255 * (1.0f - healthPercentage));
+        int green = (int)(255 * healthPercentage);
+        int blue = 0;
+
+        return Color.FromArgb(255, red, green, blue);
     }
 
     private bool IsOpposingTeam(CsTeam team1, CsTeam team2)
