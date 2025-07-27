@@ -15,7 +15,7 @@ namespace XRayPlugin;
 public class XRayPlugin : BasePlugin
 {
     public override string ModuleName => "X-Ray Plugin";
-    public override string ModuleVersion => "4.1.0";
+    public override string ModuleVersion => "4.1.1";
     public override string ModuleAuthor => "CounterStrikeSharp & Contributors";
     public override string ModuleDescription => "A plugin that provides X-Ray functionality for admins - highlights enemies with health-based glow effects (green=full health, red=low health) through walls using dynamic prop entities";
 
@@ -37,6 +37,7 @@ public class XRayPlugin : BasePlugin
         RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
         RegisterEventHandler<EventRoundStart>(OnRoundStart);
         RegisterEventHandler<EventPlayerTeam>(OnPlayerTeam);
+        RegisterEventHandler<EventPlayerHurt>(OnPlayerHurt);
         
         Console.WriteLine("X-Ray Plugin: Event handlers registered successfully!");
     }
@@ -63,6 +64,18 @@ public class XRayPlugin : BasePlugin
     {
         // Update X-Ray effects when players change teams
         Server.NextFrame(() => UpdateXRayForAllPlayers());
+        return HookResult.Continue;
+    }
+
+    [GameEventHandler]
+    public HookResult OnPlayerHurt(EventPlayerHurt @event, GameEventInfo info)
+    {
+        // Update glow color for the hurt player across all X-Ray players
+        var hurtPlayer = @event.Userid;
+        if (hurtPlayer != null && IsPlayerValid(hurtPlayer))
+        {
+            Server.NextFrame(() => UpdateGlowColorForSpecificPlayer(hurtPlayer));
+        }
         return HookResult.Continue;
     }
 
@@ -473,6 +486,32 @@ public class XRayPlugin : BasePlugin
         {
             var newColor = GetHealthBasedGlowColor(enemyPlayer);
             glowEntity.Glow.GlowColorOverride = newColor;
+        }
+    }
+
+    private void UpdateGlowColorForSpecificPlayer(CCSPlayerController targetPlayer)
+    {
+        if (!IsPlayerValid(targetPlayer))
+            return;
+
+        var targetSlot = targetPlayer.Slot;
+        var targetTeam = (CsTeam)targetPlayer.TeamNum;
+
+        // Update glow color for this player across all X-Ray players
+        var allPlayers = Utilities.GetPlayers();
+        foreach (var xrayPlayer in allPlayers)
+        {
+            if (!IsPlayerValid(xrayPlayer) || !_xrayActivePlayers.Contains(xrayPlayer.SteamID))
+                continue;
+
+            var xrayTeam = (CsTeam)xrayPlayer.TeamNum;
+            var xraySteamId = xrayPlayer.SteamID;
+
+            // Only update if target player is an enemy to this X-Ray player
+            if (IsOpposingTeam(xrayTeam, targetTeam))
+            {
+                UpdateGlowColorForEnemy(xrayPlayer, targetPlayer);
+            }
         }
     }
 
