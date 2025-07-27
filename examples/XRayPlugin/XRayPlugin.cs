@@ -15,7 +15,7 @@ namespace XRayPlugin;
 public class XRayPlugin : BasePlugin
 {
     public override string ModuleName => "X-Ray Plugin";
-    public override string ModuleVersion => "4.0.0";
+    public override string ModuleVersion => "4.0.1";
     public override string ModuleAuthor => "CounterStrikeSharp & Contributors";
     public override string ModuleDescription => "A plugin that provides X-Ray functionality for admins - highlights enemies with glow effect through walls using dynamic prop entities";
 

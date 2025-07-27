@@ -107,6 +107,7 @@ The plugin uses an advanced prop entity system for reliable X-Ray visibility:
 
 ## Version History
 
+- **v4.0.1**: Fixed issue where XRay glow effects only appeared after players respawned - now appears immediately on existing players
 - **v4.0.0**: Major rewrite using dynamic prop entity system for reliable X-Ray visibility
 - **v3.0.0**: Event-driven approach with improved glow configuration
 - **v2.0.0**: Enhanced features and Steam ID authorization
