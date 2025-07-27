@@ -377,6 +377,9 @@ public class XRayPlugin : BasePlugin
 
         _xrayActivePlayers.Add(steamId);
         
+        // Immediately update X-Ray effects for existing players
+        Server.NextFrame(() => UpdateXRayForAllPlayers());
+        
         var callerName = caller?.PlayerName ?? "Console";
         commandInfo.ReplyToCommand($"X-Ray effect applied to player '{targetPlayer.PlayerName}' by {callerName}");
         
