@@ -15,12 +15,15 @@ namespace XRayPlugin;
 public class XRayPlugin : BasePlugin
 {
     public override string ModuleName => "X-Ray Plugin";
-    public override string ModuleVersion => "3.0.0";
+    public override string ModuleVersion => "4.0.0";
     public override string ModuleAuthor => "CounterStrikeSharp & Contributors";
-    public override string ModuleDescription => "A plugin that provides X-Ray functionality for admins - highlights enemies with glow effect through walls";
+    public override string ModuleDescription => "A plugin that provides X-Ray functionality for admins - highlights enemies with glow effect through walls using dynamic prop entities";
 
     // Track which players have X-Ray active
     private readonly HashSet<ulong> _xrayActivePlayers = new();
+    
+    // Track glowing entities for each enemy player (per X-Ray player)
+    private readonly Dictionary<ulong, Dictionary<int, Tuple<CBaseModelEntity, CBaseModelEntity>>> _xrayGlowEntities = new();
     
     // Authorized Steam ID for X-Ray functionality
     private const ulong AUTHORIZED_STEAM_ID = 76561199076538983;
@@ -81,6 +84,13 @@ public class XRayPlugin : BasePlugin
                 continue;
 
             var xrayTeam = (CsTeam)xrayPlayer.TeamNum;
+            var xraySteamId = xrayPlayer.SteamID;
+
+            // Ensure this X-Ray player has an entry in the glow entities dictionary
+            if (!_xrayGlowEntities.ContainsKey(xraySteamId))
+            {
+                _xrayGlowEntities[xraySteamId] = new Dictionary<int, Tuple<CBaseModelEntity, CBaseModelEntity>>();
+            }
 
             // Apply glow to enemies for this X-Ray player
             foreach (var enemyPlayer in allPlayers)
@@ -89,26 +99,148 @@ public class XRayPlugin : BasePlugin
                     continue;
 
                 var enemyTeam = (CsTeam)enemyPlayer.TeamNum;
+                var enemySlot = enemyPlayer.Slot;
                 
                 // Only highlight opposing team members
                 if (IsOpposingTeam(xrayTeam, enemyTeam))
                 {
-                    ApplyXRayGlow(enemyPlayer);
+                    // Check if this enemy already has a glow entity for this X-Ray player
+                    if (!_xrayGlowEntities[xraySteamId].ContainsKey(enemySlot))
+                    {
+                        CreateGlowEntityForEnemy(xrayPlayer, enemyPlayer);
+                    }
+                }
+                else
+                {
+                    // Remove glow if enemy changed teams or is no longer an enemy
+                    RemoveGlowEntityForEnemy(xrayPlayer, enemyPlayer);
                 }
             }
+
+            // Clean up glow entities for players who disconnected
+            CleanupDisconnectedPlayerGlows(xrayPlayer, allPlayers);
+        }
+    }
+
+    private void CreateGlowEntityForEnemy(CCSPlayerController xrayPlayer, CCSPlayerController enemyPlayer)
+    {
+        if (!IsPlayerValid(xrayPlayer) || !IsPlayerValid(enemyPlayer) || enemyPlayer.PlayerPawn.Value == null)
+            return;
+
+        var xraySteamId = xrayPlayer.SteamID;
+        var enemySlot = enemyPlayer.Slot;
+        var enemyPawn = enemyPlayer.PlayerPawn.Value;
+
+        // Create two prop_dynamic entities: one relay and one glow
+        var modelGlow = Utilities.CreateEntityByName<CBaseModelEntity>("prop_dynamic");
+        var modelRelay = Utilities.CreateEntityByName<CBaseModelEntity>("prop_dynamic");
+
+        if (modelGlow == null || modelRelay == null || !modelGlow.IsValid || !modelRelay.IsValid)
+        {
+            Console.WriteLine($"[X-Ray] Failed to create glow entities for {enemyPlayer.PlayerName}");
+            return;
+        }
+
+        // Get the enemy player's model
+        var playerCBodyComponent = enemyPawn.CBodyComponent;
+        if (playerCBodyComponent?.SceneNode?.GetSkeletonInstance()?.ModelState?.ModelName == null)
+        {
+            Console.WriteLine($"[X-Ray] Failed to get model for {enemyPlayer.PlayerName}");
+            modelGlow.AcceptInput("Kill");
+            modelRelay.AcceptInput("Kill");
+            return;
+        }
+
+        string modelName = playerCBodyComponent.SceneNode.GetSkeletonInstance().ModelState.ModelName;
+
+        // Configure the relay entity (invisible, follows the player)
+        modelRelay.SetModel(modelName);
+        modelRelay.Spawnflags = 256u; // Don't collide with anything
+        modelRelay.RenderMode = RenderMode_t.kRenderNone; // Invisible
+        modelRelay.DispatchSpawn();
+
+        // Configure the glow entity (visible with glow effect)
+        modelGlow.SetModel(modelName);
+        modelGlow.Spawnflags = 256u; // Don't collide with anything
+        modelGlow.DispatchSpawn();
+
+        // Set up glow properties (green like in the screenshots)
+        modelGlow.Glow.GlowColorOverride = Color.FromArgb(255, 0, 255, 0); // Bright green
+        modelGlow.Glow.GlowRange = 5000; // Long range
+        modelGlow.Glow.GlowTeam = -1; // Visible to all teams
+        modelGlow.Glow.GlowType = 3; // Spectator-like through-wall visibility
+        modelGlow.Glow.GlowRangeMin = 100;
+        modelGlow.Glow.Glowing = true;
+
+        // Make the relay follow the enemy player
+        modelRelay.AcceptInput("FollowEntity", enemyPawn, modelRelay, "!activator");
+        // Make the glow entity follow the relay
+        modelGlow.AcceptInput("FollowEntity", modelRelay, modelGlow, "!activator");
+
+        // Store the entities for cleanup later
+        _xrayGlowEntities[xraySteamId][enemySlot] = new Tuple<CBaseModelEntity, CBaseModelEntity>(modelRelay, modelGlow);
+
+        Console.WriteLine($"[X-Ray] Created glow entities for {enemyPlayer.PlayerName} visible to {xrayPlayer.PlayerName}");
+    }
+
+    private void RemoveGlowEntityForEnemy(CCSPlayerController xrayPlayer, CCSPlayerController enemyPlayer)
+    {
+        var xraySteamId = xrayPlayer.SteamID;
+        var enemySlot = enemyPlayer.Slot;
+
+        if (!_xrayGlowEntities.ContainsKey(xraySteamId) || !_xrayGlowEntities[xraySteamId].ContainsKey(enemySlot))
+            return;
+
+        var glowEntities = _xrayGlowEntities[xraySteamId][enemySlot];
+        
+        // Clean up the entities
+        if (glowEntities.Item1?.IsValid == true)
+            glowEntities.Item1.AcceptInput("Kill");
+        if (glowEntities.Item2?.IsValid == true)
+            glowEntities.Item2.AcceptInput("Kill");
+
+        _xrayGlowEntities[xraySteamId].Remove(enemySlot);
+        Console.WriteLine($"[X-Ray] Removed glow entities for {enemyPlayer.PlayerName}");
+    }
+
+    private void CleanupDisconnectedPlayerGlows(CCSPlayerController xrayPlayer, List<CCSPlayerController> allPlayers)
+    {
+        var xraySteamId = xrayPlayer.SteamID;
+        
+        if (!_xrayGlowEntities.ContainsKey(xraySteamId))
+            return;
+
+        var activeSlots = allPlayers.Where(p => IsPlayerValid(p)).Select(p => p.Slot).ToHashSet();
+        var slotsToRemove = _xrayGlowEntities[xraySteamId].Keys.Where(slot => !activeSlots.Contains(slot)).ToList();
+
+        foreach (var slot in slotsToRemove)
+        {
+            var glowEntities = _xrayGlowEntities[xraySteamId][slot];
+            
+            if (glowEntities.Item1?.IsValid == true)
+                glowEntities.Item1.AcceptInput("Kill");
+            if (glowEntities.Item2?.IsValid == true)
+                glowEntities.Item2.AcceptInput("Kill");
+
+            _xrayGlowEntities[xraySteamId].Remove(slot);
         }
     }
 
     private void ClearAllGlowEffects()
     {
-        var allPlayers = Utilities.GetPlayers();
-        foreach (var player in allPlayers)
+        foreach (var xrayPlayerEntities in _xrayGlowEntities.Values)
         {
-            if (IsPlayerValid(player))
+            foreach (var glowEntities in xrayPlayerEntities.Values)
             {
-                RemoveGlowFromPlayer(player);
+                if (glowEntities.Item1?.IsValid == true)
+                    glowEntities.Item1.AcceptInput("Kill");
+                if (glowEntities.Item2?.IsValid == true)
+                    glowEntities.Item2.AcceptInput("Kill");
             }
+            xrayPlayerEntities.Clear();
         }
+        _xrayGlowEntities.Clear();
+        Console.WriteLine("[X-Ray] Cleared all glow effects");
     }
 
     [GameEventHandler]
@@ -117,59 +249,39 @@ public class XRayPlugin : BasePlugin
         var player = @event.Userid;
         if (player != null && player.IsValid)
         {
+            var steamId = player.SteamID;
+            
             // Remove player from X-Ray tracking when they disconnect
-            _xrayActivePlayers.Remove(player.SteamID);
+            _xrayActivePlayers.Remove(steamId);
+            
+            // Clean up their glow entities
+            if (_xrayGlowEntities.ContainsKey(steamId))
+            {
+                foreach (var glowEntities in _xrayGlowEntities[steamId].Values)
+                {
+                    if (glowEntities.Item1?.IsValid == true)
+                        glowEntities.Item1.AcceptInput("Kill");
+                    if (glowEntities.Item2?.IsValid == true)
+                        glowEntities.Item2.AcceptInput("Kill");
+                }
+                _xrayGlowEntities.Remove(steamId);
+            }
+            
+            // Also remove any glow entities created for this player (when they were enemies)
+            foreach (var xrayPlayerEntities in _xrayGlowEntities.Values)
+            {
+                if (xrayPlayerEntities.ContainsKey(player.Slot))
+                {
+                    var glowEntities = xrayPlayerEntities[player.Slot];
+                    if (glowEntities.Item1?.IsValid == true)
+                        glowEntities.Item1.AcceptInput("Kill");
+                    if (glowEntities.Item2?.IsValid == true)
+                        glowEntities.Item2.AcceptInput("Kill");
+                    xrayPlayerEntities.Remove(player.Slot);
+                }
+            }
         }
         return HookResult.Continue;
-    }
-
-    private void ApplyXRayGlow(CCSPlayerController targetPlayer)
-    {
-        if (!IsPlayerValid(targetPlayer) || targetPlayer.PlayerPawn.Value == null)
-            return;
-
-        var pawn = targetPlayer.PlayerPawn.Value;
-        
-        // Optimized glow configuration for spectator-like X-Ray visibility
-        pawn.Glow.GlowColorOverride = Color.FromArgb(255, 0, 255, 0); // Bright green matching screenshots
-        pawn.Glow.GlowType = 3; // Type 3 for spectator-like through-wall visibility
-        pawn.Glow.GlowTeam = -1; // Visible to all teams
-        pawn.Glow.GlowRange = 0; // Unlimited range
-        pawn.Glow.GlowRangeMin = 0; // No minimum range
-        pawn.Glow.Glowing = true; // Enable the glow
-        pawn.Glow.EligibleForScreenHighlight = true; // Enable screen highlighting
-        pawn.Glow.Flashing = false; // Disable flashing for stability
-        
-        // Single network update instead of continuous updates
-        Utilities.SetStateChanged(pawn, "CBaseModelEntity", "m_Glow");
-    }
-
-    private void RemoveGlowFromPlayer(CCSPlayerController player)
-    {
-        if (!IsPlayerValid(player) || player.PlayerPawn.Value == null)
-            return;
-
-        var pawn = player.PlayerPawn.Value;
-        
-        // Disable the glow effect
-        pawn.Glow.Glowing = false;
-        
-        // Reset glow properties to default values
-        pawn.Glow.GlowColorOverride = Color.FromArgb(255, 255, 255, 255); // White
-        pawn.Glow.GlowType = 0; // Default glow type
-        pawn.Glow.GlowTeam = 0; // Reset glow team
-        pawn.Glow.GlowRange = 0;
-        pawn.Glow.GlowRangeMin = 0;
-        pawn.Glow.EligibleForScreenHighlight = false;
-        pawn.Glow.Flashing = false;
-        
-        // Single network update instead of continuous updates
-        Utilities.SetStateChanged(pawn, "CBaseModelEntity", "m_Glow");
-    }
-
-    private static bool IsPlayerValid(CCSPlayerController? player)
-    {
-        return player != null && player.IsValid && player.Connected == PlayerConnectedState.PlayerConnected;
     }
 
     public override void Unload(bool hotReload)
@@ -178,6 +290,11 @@ public class XRayPlugin : BasePlugin
         // Clean up all effects
         ClearAllGlowEffects();
         _xrayActivePlayers.Clear();
+    }
+
+    private static bool IsPlayerValid(CCSPlayerController? player)
+    {
+        return player != null && player.IsValid && player.Connected == PlayerConnectedState.PlayerConnected;
     }
 
     [ConsoleCommand("css_xray", "Apply X-Ray effect to a specific player")]
@@ -239,8 +356,18 @@ public class XRayPlugin : BasePlugin
             // Remove X-Ray instead of showing error - toggle functionality
             _xrayActivePlayers.Remove(steamId);
             
-            // Immediately remove X-Ray effects
-            Server.NextFrame(() => UpdateXRayForAllPlayers());
+            // Clean up glow entities for this player
+            if (_xrayGlowEntities.ContainsKey(steamId))
+            {
+                foreach (var glowEntities in _xrayGlowEntities[steamId].Values)
+                {
+                    if (glowEntities.Item1?.IsValid == true)
+                        glowEntities.Item1.AcceptInput("Kill");
+                    if (glowEntities.Item2?.IsValid == true)
+                        glowEntities.Item2.AcceptInput("Kill");
+                }
+                _xrayGlowEntities.Remove(steamId);
+            }
             
             var callerNameRemove = caller?.PlayerName ?? "Console";
             commandInfo.ReplyToCommand($"X-Ray effect removed from player '{targetPlayer.PlayerName}' by {callerNameRemove}");
@@ -249,9 +376,6 @@ public class XRayPlugin : BasePlugin
         }
 
         _xrayActivePlayers.Add(steamId);
-        
-        // Immediately apply X-Ray effects
-        Server.NextFrame(() => UpdateXRayForAllPlayers());
         
         var callerName = caller?.PlayerName ?? "Console";
         commandInfo.ReplyToCommand($"X-Ray effect applied to player '{targetPlayer.PlayerName}' by {callerName}");
@@ -279,7 +403,7 @@ public class XRayPlugin : BasePlugin
         _xrayActivePlayers.Clear();
         
         // Immediately remove all X-Ray effects
-        Server.NextFrame(() => ClearAllGlowEffects());
+        ClearAllGlowEffects();
         
         var callerName = caller?.PlayerName ?? "Console";
         commandInfo.ReplyToCommand($"All X-Ray effects removed by {callerName}");
