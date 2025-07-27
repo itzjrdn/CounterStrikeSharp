@@ -40,6 +40,7 @@ public class FlyingScoutsmanPlugin : BasePlugin
         RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
         RegisterEventHandler<EventPlayerDeath>(OnPlayerDeath);
         RegisterEventHandler<EventWeaponFire>(OnWeaponFire);
+        RegisterEventHandler<EventItemPickup>(OnItemPickup);
         
         // If hot reload, apply to existing players
         if (hotReload)
@@ -74,9 +75,13 @@ public class FlyingScoutsmanPlugin : BasePlugin
         _terroristRounds = 0;
         _counterTerroristRounds = 0;
         
+        // Disable buy menu for all players
+        DisableBuyMenuForAllPlayers();
+        
         // Notify all players
         Server.PrintToChatAll($"{ChatColors.LightBlue}[Flying Scoutsman] {ChatColors.White}Loading Flying Scoutsman map!");
         Server.PrintToChatAll($"{ChatColors.Green}[Flying Scoutsman] {ChatColors.White}Game mode activated! First to {MAX_ROUNDS} rounds wins!");
+        Server.PrintToChatAll($"{ChatColors.Yellow}[Flying Scoutsman] {ChatColors.White}Buy menu disabled - you'll get your SSG08 automatically!");
         
         commandInfo.ReplyToCommand("Flying Scoutsman map loading initiated!");
     }
@@ -90,13 +95,14 @@ public class FlyingScoutsmanPlugin : BasePlugin
         _terroristRounds = 0;
         _counterTerroristRounds = 0;
         
-        // Balance teams
-        BalanceTeams();
+        // Disable buy menu for all players
+        DisableBuyMenuForAllPlayers();
         
         // Apply flying mechanics to all players
         ApplyFlyingMechanicsToAllPlayers();
         
         Server.PrintToChatAll($"{ChatColors.LightBlue}[Flying Scoutsman] {ChatColors.White}Game mode started! First to {MAX_ROUNDS} rounds wins!");
+        Server.PrintToChatAll($"{ChatColors.Yellow}[Flying Scoutsman] {ChatColors.White}Buy menu disabled - you'll get your SSG08 automatically!");
         UpdateScoreHUD();
         
         commandInfo.ReplyToCommand("Flying Scoutsman mode started!");
@@ -108,8 +114,11 @@ public class FlyingScoutsmanPlugin : BasePlugin
     {
         _gameModeActive = false;
         ResetGravityForAllPlayers();
+        EnableBuyMenuForAllPlayers();
+        ResetWeaponAccuracy();
         
         Server.PrintToChatAll($"{ChatColors.LightRed}[Flying Scoutsman] {ChatColors.White}Game mode stopped!");
+        Server.PrintToChatAll($"{ChatColors.Green}[Flying Scoutsman] {ChatColors.White}Buy menu re-enabled!");
         
         commandInfo.ReplyToCommand("Flying Scoutsman mode stopped!");
     }
@@ -127,15 +136,13 @@ public class FlyingScoutsmanPlugin : BasePlugin
         // Increment round counter
         _roundsPlayed++;
         
-        // Ensure teams are balanced
-        BalanceTeams();
-        
-        // Apply flying mechanics to all players
+        // Apply flying mechanics and weapon configurations to all players
         Server.NextFrame(() =>
         {
             ApplyFlyingMechanicsToAllPlayers();
             RemoveRestrictedWeapons();
             EquipAllowedWeapons();
+            ApplyWeaponAccuracyModifications();
         });
         
         // Update HUD
@@ -143,7 +150,7 @@ public class FlyingScoutsmanPlugin : BasePlugin
         
         // Announce round info
         Server.PrintToChatAll($"{ChatColors.Green}[Flying Scoutsman] {ChatColors.White}Round {_roundsPlayed} - T:{_terroristRounds} CT:{_counterTerroristRounds}");
-        Server.PrintToChatAll($"{ChatColors.Yellow}[Flying Scoutsman] {ChatColors.White}Only SSG 08 and knives allowed!");
+        Server.PrintToChatAll($"{ChatColors.Yellow}[Flying Scoutsman] {ChatColors.White}Perfect accuracy enabled! SSG08 and knives only!");
         
         return HookResult.Continue;
     }
@@ -200,7 +207,7 @@ public class FlyingScoutsmanPlugin : BasePlugin
 
         Logger.LogInformation($"Flying Scoutsman: Player {player.PlayerName} spawned");
         
-        // Apply flying mechanics with a slight delay to ensure player is fully spawned
+        // Apply flying mechanics and weapon configurations with a slight delay to ensure player is fully spawned
         Server.NextFrame(() =>
         {
             ApplyFlyingMechanics(player);
@@ -208,6 +215,9 @@ public class FlyingScoutsmanPlugin : BasePlugin
             // Remove all weapons and give allowed ones
             RemoveAllWeapons(player);
             GiveAllowedWeapons(player);
+            
+            // Apply weapon accuracy modifications
+            ApplyWeaponAccuracyToPlayer(player);
         });
         
         return HookResult.Continue;
@@ -252,6 +262,7 @@ public class FlyingScoutsmanPlugin : BasePlugin
             {
                 RemoveAllWeapons(player);
                 GiveAllowedWeapons(player);
+                ApplyWeaponAccuracyToPlayer(player);
                 player.PrintToChat($"{ChatColors.Red}[Flying Scoutsman] {ChatColors.White}Only SSG 08 and knives allowed!");
             });
         }
@@ -259,33 +270,117 @@ public class FlyingScoutsmanPlugin : BasePlugin
         return HookResult.Continue;
     }
 
-    private void BalanceTeams()
+    [GameEventHandler]
+    public HookResult OnItemPickup(EventItemPickup @event, GameEventInfo info)
     {
-        var players = Utilities.GetPlayers().Where(p => p.IsValid && !p.IsBot && p.Connected == PlayerConnectedState.PlayerConnected).ToList();
-        
-        if (players.Count < 2) return;
+        if (!_gameModeActive) return HookResult.Continue;
 
-        Logger.LogInformation($"Flying Scoutsman: Balancing teams with {players.Count} players");
+        var player = @event.Userid;
+        var item = @event.Item;
         
-        // Shuffle players for random distribution
-        var random = new Random();
-        players = players.OrderBy(x => random.Next()).ToList();
-        
-        // Assign players to teams alternately
-        for (int i = 0; i < players.Count; i++)
+        if (player == null || !player.IsValid || player.IsBot) return HookResult.Continue;
+
+        // If player picks up SSG08, apply accuracy modifications
+        if (item == "weapon_ssg08")
         {
-            var team = (i % 2 == 0) ? CsTeam.Terrorist : CsTeam.CounterTerrorist;
-            
-            if (players[i].Team != team)
+            Server.NextFrame(() =>
             {
-                players[i].ChangeTeam(team);
+                ApplyWeaponAccuracyToPlayer(player);
+                Logger.LogDebug($"Flying Scoutsman: Applied accuracy to picked up SSG08 for {player.PlayerName}");
+            });
+        }
+        // If they pick up a restricted weapon, remove it
+        else if (!IsWeaponAllowed(item))
+        {
+            Server.NextFrame(() =>
+            {
+                RemoveAllWeapons(player);
+                GiveAllowedWeapons(player);
+                ApplyWeaponAccuracyToPlayer(player);
+                player.PrintToChat($"{ChatColors.Red}[Flying Scoutsman] {ChatColors.White}Only SSG 08 and knives allowed!");
+            });
+        }
+        
+        return HookResult.Continue;
+    }
+
+    private void DisableBuyMenuForAllPlayers()
+    {
+        var players = Utilities.GetPlayers().Where(p => p.IsValid && !p.IsBot).ToList();
+        
+        foreach (var player in players)
+        {
+            try
+            {
+                // Disable buy menu by setting account to 0 and freezing money
+                if (player.InGameMoneyServices != null)
+                {
+                    player.InGameMoneyServices.Account = 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, $"Failed to disable buy menu for player {player.PlayerName}");
             }
         }
         
-        var tCount = players.Count(p => p.Team == CsTeam.Terrorist);
-        var ctCount = players.Count(p => p.Team == CsTeam.CounterTerrorist);
+        // Execute server command to disable buy zone
+        Server.ExecuteCommand("mp_buytime 0");
+        Server.ExecuteCommand("mp_buy_anywhere 0");
         
-        Server.PrintToChatAll($"{ChatColors.LightBlue}[Flying Scoutsman] {ChatColors.White}Teams balanced: T({tCount}) vs CT({ctCount})");
+        Logger.LogInformation($"Flying Scoutsman: Disabled buy menu for {players.Count} players");
+    }
+
+    private void EnableBuyMenuForAllPlayers()
+    {
+        // Re-enable buy zone (default values)
+        Server.ExecuteCommand("mp_buytime 60");
+        Server.ExecuteCommand("mp_buy_anywhere 0");
+        
+        Logger.LogInformation("Flying Scoutsman: Re-enabled buy menu");
+    }
+
+    private void ApplyWeaponAccuracyModifications()
+    {
+        // Use server cvars to achieve perfect accuracy for all weapons, especially SSG08
+        Server.ExecuteCommand("weapon_accuracy_nospread 1");
+        Server.ExecuteCommand("weapon_recoil_scale 0");
+        Server.ExecuteCommand("weapon_accuracy_spread_alt 0");
+        Server.ExecuteCommand("weapon_recoil_vel_decay 1");
+        Server.ExecuteCommand("weapon_recoil_view_punch_extra 0");
+        
+        Logger.LogInformation("Flying Scoutsman: Applied perfect weapon accuracy via server cvars");
+    }
+
+    private void ResetWeaponAccuracy()
+    {
+        // Reset weapon accuracy cvars to default values
+        Server.ExecuteCommand("weapon_accuracy_nospread 0");
+        Server.ExecuteCommand("weapon_recoil_scale 2");
+        Server.ExecuteCommand("weapon_accuracy_spread_alt 1");
+        Server.ExecuteCommand("weapon_recoil_vel_decay 0.35");
+        Server.ExecuteCommand("weapon_recoil_view_punch_extra 0.055");
+        
+        Logger.LogInformation("Flying Scoutsman: Reset weapon accuracy to default values");
+    }
+
+    private void ApplyWeaponAccuracyToPlayer(CCSPlayerController player)
+    {
+        if (player?.PlayerPawn?.Value == null) return;
+
+        try
+        {
+            // Since we're using server cvars for accuracy, we just need to ensure the player has the right weapon
+            var weaponServices = player.PlayerPawn.Value.WeaponServices;
+            if (weaponServices != null)
+            {
+                Logger.LogDebug($"Flying Scoutsman: Player {player.PlayerName} has weapon services configured for perfect accuracy");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, $"Failed to configure weapon accuracy for player {player.PlayerName}");
+        }
     }
 
     private void ApplyFlyingMechanicsToAllPlayers()
@@ -494,7 +589,9 @@ public class FlyingScoutsmanPlugin : BasePlugin
         _terroristRounds = 0;
         _counterTerroristRounds = 0;
         
-        // Reset player gravity
+        // Reset player gravity, re-enable buy menu, and reset weapon accuracy
         ResetGravityForAllPlayers();
+        EnableBuyMenuForAllPlayers();
+        ResetWeaponAccuracy();
     }
 }
