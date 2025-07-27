@@ -15,21 +15,21 @@ namespace FlyingScoutsmanPlugin;
 public class FlyingScoutsmanPlugin : BasePlugin
 {
     public override string ModuleName => "Flying Scoutsman Plugin";
-    public override string ModuleVersion => "2.0.0";
+    public override string ModuleVersion => "3.0.0";
     public override string ModuleAuthor => "CounterStrikeSharp & Contributors";
-    public override string ModuleDescription => "Simple Flying Scoutsman gamemode with perfect accuracy, low gravity, and SSG08-only gameplay";
+    public override string ModuleDescription => "Stable Flying Scoutsman gamemode with perfect accuracy, low gravity, and SSG08-only gameplay";
 
     // Game state
     private bool _gameModeActive = false;
 
     public override void Load(bool hotReload)
     {
-        Logger.LogInformation("Flying Scoutsman Plugin loaded!");
+        Logger.LogInformation("Flying Scoutsman Plugin v3.0 loaded!");
         
         // Register event handlers
         RegisterEventHandler<EventRoundStart>(OnRoundStart);
         RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
-        RegisterEventHandler<EventItemPickup>(OnItemPickup);
+        RegisterEventHandler<EventWeaponFire>(OnWeaponFire);
     }
 
     public override void Unload(bool hotReload)
@@ -98,12 +98,12 @@ public class FlyingScoutsmanPlugin : BasePlugin
 
         Logger.LogInformation($"Flying Scoutsman: Player {player.PlayerName} spawned");
         
-        // Give weapons with a slight delay to ensure player is fully spawned
+        // Give weapons with a delay to ensure player is fully spawned
         Server.NextFrame(() =>
         {
             if (player.IsValid && player.PawnIsAlive)
             {
-                GiveWeapons(player);
+                GivePlayerWeapons(player);
             }
         });
         
@@ -111,29 +111,20 @@ public class FlyingScoutsmanPlugin : BasePlugin
     }
 
     [GameEventHandler]
-    public HookResult OnItemPickup(EventItemPickup @event, GameEventInfo info)
+    public HookResult OnWeaponFire(EventWeaponFire @event, GameEventInfo info)
     {
         if (!_gameModeActive) return HookResult.Continue;
 
         var player = @event.Userid;
-        var item = @event.Item;
+        var weapon = @event.Weapon;
         
         if (player == null || !player.IsValid || player.IsBot) return HookResult.Continue;
 
-        // Prevent pickup of non-allowed weapons
-        if (!IsWeaponAllowed(item))
+        // Allow only SSG08 and knives
+        if (weapon != "ssg08" && !weapon.Contains("knife"))
         {
-            Logger.LogDebug($"Flying Scoutsman: Blocked pickup of {item} by {player.PlayerName}");
-            
-            // Remove the picked up weapon and ensure player has correct weapons
-            Server.NextFrame(() =>
-            {
-                if (player.IsValid && player.PawnIsAlive)
-                {
-                    RemoveNonAllowedWeapons(player);
-                    GiveWeapons(player);
-                }
-            });
+            Logger.LogDebug($"Flying Scoutsman: Blocked {weapon} usage by {player.PlayerName}");
+            return HookResult.Handled; // Block the shot
         }
         
         return HookResult.Continue;
@@ -146,9 +137,17 @@ public class FlyingScoutsmanPlugin : BasePlugin
         // Apply server settings for Flying Scoutsman
         ApplyServerSettings();
         
+        // Give all current players weapons
+        var players = Utilities.GetPlayers().Where(p => p.IsValid && !p.IsBot && p.PawnIsAlive).ToList();
+        foreach (var player in players)
+        {
+            GivePlayerWeapons(player);
+        }
+        
         // Notify all players
         Server.PrintToChatAll($"{ChatColors.LightBlue}[Flying Scoutsman] {ChatColors.White}Game mode activated!");
         Server.PrintToChatAll($"{ChatColors.Yellow}[Flying Scoutsman] {ChatColors.White}Float and Flick! SSG08 and knives only!");
+        Server.PrintToChatAll($"{ChatColors.Green}[Flying Scoutsman] {ChatColors.White}Flying Scoutsman mode enabled!");
         
         Logger.LogInformation("Flying Scoutsman mode activated");
     }
@@ -168,21 +167,22 @@ public class FlyingScoutsmanPlugin : BasePlugin
 
     private void ApplyServerSettings()
     {
-        // Core Flying Scoutsman settings
+        // Core Flying Scoutsman settings with CS2-compatible cvars only
         Server.ExecuteCommand("sv_gravity 200");                  // Low gravity
         Server.ExecuteCommand("sv_airaccelerate 2000");          // High air acceleration
-        Server.ExecuteCommand("mp_falldamage 0");                // Disable fall damage
-        Server.ExecuteCommand("mp_buy_anywhere 0");              // Disable buy anywhere
         Server.ExecuteCommand("mp_buytime 0");                   // Disable buy menu entirely
+        Server.ExecuteCommand("mp_buy_anywhere 0");              // Disable buy anywhere
         
-        // Perfect accuracy settings for SSG08
-        Server.ExecuteCommand("weapon_accuracy_nospread 1");      // No spread
-        Server.ExecuteCommand("weapon_recoil_scale 0");           // No recoil
+        // Movement and accuracy enhancements
         Server.ExecuteCommand("sv_enablebunnyhopping 1");         // Enable bunnyhopping
         Server.ExecuteCommand("sv_autobunnyhopping 1");           // Auto bunnyhop
         Server.ExecuteCommand("sv_staminamax 0");                 // Disable stamina
         Server.ExecuteCommand("sv_staminalandcost 0");            // No crouch slowdown
         Server.ExecuteCommand("sv_staminajumpcost 0");            // No jump stamina cost
+        
+        // Perfect accuracy for weapons (CS2 compatible)
+        Server.ExecuteCommand("weapon_accuracy_nospread 1");      // No spread
+        Server.ExecuteCommand("sv_infinite_ammo 1");              // Infinite ammo
         
         Logger.LogInformation("Applied Flying Scoutsman server settings");
     }
@@ -192,18 +192,19 @@ public class FlyingScoutsmanPlugin : BasePlugin
         // Reset to default server settings
         Server.ExecuteCommand("sv_gravity 800");                  // Default gravity
         Server.ExecuteCommand("sv_airaccelerate 12");             // Default air acceleration  
-        Server.ExecuteCommand("mp_falldamage 1");                 // Enable fall damage
         Server.ExecuteCommand("mp_buytime 60");                   // Default buy time
         Server.ExecuteCommand("mp_buy_anywhere 0");               // Keep buy anywhere disabled
         
-        // Reset accuracy settings
-        Server.ExecuteCommand("weapon_accuracy_nospread 0");      // Default spread
-        Server.ExecuteCommand("weapon_recoil_scale 2");           // Default recoil
+        // Reset movement settings
         Server.ExecuteCommand("sv_enablebunnyhopping 0");         // Disable bunnyhopping
         Server.ExecuteCommand("sv_autobunnyhopping 0");           // Disable auto bunnyhop
         Server.ExecuteCommand("sv_staminamax 80");                // Default stamina
         Server.ExecuteCommand("sv_staminalandcost 30");           // Default crouch cost
         Server.ExecuteCommand("sv_staminajumpcost 8");            // Default jump cost
+        
+        // Reset accuracy settings
+        Server.ExecuteCommand("weapon_accuracy_nospread 0");      // Default spread
+        Server.ExecuteCommand("sv_infinite_ammo 0");              // Default ammo
         
         Logger.LogInformation("Reset server settings to defaults");
     }
@@ -228,51 +229,36 @@ public class FlyingScoutsmanPlugin : BasePlugin
         Logger.LogDebug($"Showed round start message to {players.Count} players");
     }
 
-    private void GiveWeapons(CCSPlayerController player)
+    private void GivePlayerWeapons(CCSPlayerController player)
     {
         if (player?.PlayerPawn?.Value == null) return;
 
         try
         {
-            var weaponServices = player.PlayerPawn.Value.WeaponServices;
-            if (weaponServices == null) return;
-
-            // Check what weapons player currently has
-            bool hasSSG08 = false;
-            bool hasKnife = false;
+            // Remove all weapons first to prevent conflicts
+            RemoveAllWeapons(player);
             
-            foreach (var weapon in weaponServices.MyWeapons)
+            // Add small delay before giving weapons
+            Server.NextFrame(() =>
             {
-                if (weapon?.Value?.DesignerName != null)
+                if (player.IsValid && player.PawnIsAlive)
                 {
-                    var weaponName = weapon.Value.DesignerName;
-                    if (weaponName == "weapon_ssg08")
-                        hasSSG08 = true;
-                    else if (weaponName.Contains("knife"))
-                        hasKnife = true;
+                    // Give SSG08
+                    player.GiveNamedItem(CsItem.SSG08);
+                    
+                    // Give appropriate knife based on team
+                    if (player.Team == CsTeam.Terrorist)
+                    {
+                        player.GiveNamedItem(CsItem.DefaultKnifeT);
+                    }
+                    else if (player.Team == CsTeam.CounterTerrorist)
+                    {
+                        player.GiveNamedItem(CsItem.DefaultKnifeCT);
+                    }
+                    
+                    Logger.LogDebug($"Gave SSG08 and knife to {player.PlayerName}");
                 }
-            }
-            
-            // Give SSG08 if player doesn't have one
-            if (!hasSSG08)
-            {
-                player.GiveNamedItem(CsItem.SSG08);
-                Logger.LogDebug($"Gave SSG08 to {player.PlayerName}");
-            }
-            
-            // Give appropriate knife if player doesn't have one
-            if (!hasKnife)
-            {
-                if (player.Team == CsTeam.Terrorist)
-                {
-                    player.GiveNamedItem(CsItem.DefaultKnifeT);
-                }
-                else if (player.Team == CsTeam.CounterTerrorist)
-                {
-                    player.GiveNamedItem(CsItem.DefaultKnifeCT);
-                }
-                Logger.LogDebug($"Gave knife to {player.PlayerName}");
-            }
+            });
         }
         catch (Exception ex)
         {
@@ -280,7 +266,7 @@ public class FlyingScoutsmanPlugin : BasePlugin
         }
     }
 
-    private void RemoveNonAllowedWeapons(CCSPlayerController player)
+    private void RemoveAllWeapons(CCSPlayerController player)
     {
         if (player?.PlayerPawn?.Value == null) return;
 
@@ -289,18 +275,14 @@ public class FlyingScoutsmanPlugin : BasePlugin
             var weaponServices = player.PlayerPawn.Value.WeaponServices;
             if (weaponServices == null) return;
 
-            // Remove only weapons that are not allowed, keep SSG08 and knives
-            var weapons = weaponServices.MyWeapons.ToList();
+            // Create a copy of the weapons list to avoid modification during iteration
+            var weapons = weaponServices.MyWeapons.Where(w => w?.Value != null).ToList();
+            
             foreach (var weapon in weapons)
             {
                 if (weapon?.Value?.DesignerName != null)
                 {
-                    var weaponName = weapon.Value.DesignerName;
-                    if (!IsWeaponAllowed(weaponName))
-                    {
-                        weapon.Value.Remove();
-                        Logger.LogDebug($"Removed {weaponName} from {player.PlayerName}");
-                    }
+                    weapon.Value.Remove();
                 }
             }
         }
@@ -308,11 +290,5 @@ public class FlyingScoutsmanPlugin : BasePlugin
         {
             Logger.LogError(ex, $"Failed to remove weapons from player {player.PlayerName}");
         }
-    }
-
-    private bool IsWeaponAllowed(string weaponName)
-    {
-        // Only allow SSG08 and various knife types
-        return weaponName == "weapon_ssg08" || weaponName.Contains("knife");
     }
 }
