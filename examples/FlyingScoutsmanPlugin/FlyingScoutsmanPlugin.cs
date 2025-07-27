@@ -29,6 +29,10 @@ public class FlyingScoutsmanPlugin : BasePlugin
     private const int MAX_ROUNDS = 13;
     private const float GRAVITY_SCALE = 0.3f; // Reduced gravity for flying mechanics
     private readonly List<CCSPlayerController> _playersToRespawn = new();
+    
+    // Cooldown tracking to prevent spam
+    private readonly Dictionary<ulong, DateTime> _lastWeaponWarning = new();
+    private readonly TimeSpan WEAPON_WARNING_COOLDOWN = TimeSpan.FromSeconds(3);
 
     public override void Load(bool hotReload)
     {
@@ -210,14 +214,14 @@ public class FlyingScoutsmanPlugin : BasePlugin
         // Apply flying mechanics and weapon configurations with a slight delay to ensure player is fully spawned
         Server.NextFrame(() =>
         {
-            ApplyFlyingMechanics(player);
-            
-            // Remove all weapons and give allowed ones
-            RemoveAllWeapons(player);
-            GiveAllowedWeapons(player);
-            
-            // Apply weapon accuracy modifications
-            ApplyWeaponAccuracyToPlayer(player);
+            if (player.IsValid && player.PawnIsAlive)
+            {
+                ApplyFlyingMechanics(player);
+                
+                // Remove all weapons and give allowed ones
+                RemoveAllWeapons(player);
+                GiveAllowedWeapons(player);
+            }
         });
         
         return HookResult.Continue;
@@ -257,13 +261,25 @@ public class FlyingScoutsmanPlugin : BasePlugin
         {
             Logger.LogInformation($"Flying Scoutsman: Player {player.PlayerName} fired restricted weapon: {weapon}");
             
-            // Remove the weapon and give SSG08
+            // Only show warning message with cooldown to prevent spam
+            var steamId = player.SteamID;
+            var now = DateTime.UtcNow;
+            
+            if (!_lastWeaponWarning.ContainsKey(steamId) || 
+                now - _lastWeaponWarning[steamId] > WEAPON_WARNING_COOLDOWN)
+            {
+                _lastWeaponWarning[steamId] = now;
+                player.PrintToChat($"{ChatColors.Red}[Flying Scoutsman] {ChatColors.White}Only SSG 08 and knives allowed!");
+            }
+            
+            // Remove restricted weapon and give allowed ones only once per round
             Server.NextFrame(() =>
             {
-                RemoveAllWeapons(player);
-                GiveAllowedWeapons(player);
-                ApplyWeaponAccuracyToPlayer(player);
-                player.PrintToChat($"{ChatColors.Red}[Flying Scoutsman] {ChatColors.White}Only SSG 08 and knives allowed!");
+                if (player.IsValid && player.PawnIsAlive)
+                {
+                    RemoveAllWeapons(player);
+                    GiveAllowedWeapons(player);
+                }
             });
         }
         
@@ -283,21 +299,29 @@ public class FlyingScoutsmanPlugin : BasePlugin
         // If player picks up SSG08, apply accuracy modifications
         if (item == "weapon_ssg08")
         {
-            Server.NextFrame(() =>
-            {
-                ApplyWeaponAccuracyToPlayer(player);
-                Logger.LogDebug($"Flying Scoutsman: Applied accuracy to picked up SSG08 for {player.PlayerName}");
-            });
+            Logger.LogDebug($"Flying Scoutsman: Player {player.PlayerName} picked up SSG08");
         }
-        // If they pick up a restricted weapon, remove it
+        // If they pick up a restricted weapon, remove it with cooldown
         else if (!IsWeaponAllowed(item))
         {
+            var steamId = player.SteamID;
+            var now = DateTime.UtcNow;
+            
+            // Only show warning with cooldown to prevent spam
+            if (!_lastWeaponWarning.ContainsKey(steamId) || 
+                now - _lastWeaponWarning[steamId] > WEAPON_WARNING_COOLDOWN)
+            {
+                _lastWeaponWarning[steamId] = now;
+                player.PrintToChat($"{ChatColors.Red}[Flying Scoutsman] {ChatColors.White}Only SSG 08 and knives allowed!");
+            }
+            
             Server.NextFrame(() =>
             {
-                RemoveAllWeapons(player);
-                GiveAllowedWeapons(player);
-                ApplyWeaponAccuracyToPlayer(player);
-                player.PrintToChat($"{ChatColors.Red}[Flying Scoutsman] {ChatColors.White}Only SSG 08 and knives allowed!");
+                if (player.IsValid && player.PawnIsAlive)
+                {
+                    RemoveAllWeapons(player);
+                    GiveAllowedWeapons(player);
+                }
             });
         }
         
@@ -362,25 +386,6 @@ public class FlyingScoutsmanPlugin : BasePlugin
         Server.ExecuteCommand("weapon_recoil_view_punch_extra 0.055");
         
         Logger.LogInformation("Flying Scoutsman: Reset weapon accuracy to default values");
-    }
-
-    private void ApplyWeaponAccuracyToPlayer(CCSPlayerController player)
-    {
-        if (player?.PlayerPawn?.Value == null) return;
-
-        try
-        {
-            // Since we're using server cvars for accuracy, we just need to ensure the player has the right weapon
-            var weaponServices = player.PlayerPawn.Value.WeaponServices;
-            if (weaponServices != null)
-            {
-                Logger.LogDebug($"Flying Scoutsman: Player {player.PlayerName} has weapon services configured for perfect accuracy");
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, $"Failed to configure weapon accuracy for player {player.PlayerName}");
-        }
     }
 
     private void ApplyFlyingMechanicsToAllPlayers()
@@ -478,7 +483,23 @@ public class FlyingScoutsmanPlugin : BasePlugin
 
         try
         {
-            player.RemoveWeapons();
+            // Use safer weapon removal to prevent entity spam
+            var weaponServices = player.PlayerPawn.Value.WeaponServices;
+            if (weaponServices == null) return;
+
+            // Only remove weapons that are not allowed
+            var weapons = weaponServices.MyWeapons.ToList();
+            foreach (var weapon in weapons)
+            {
+                if (weapon?.Value?.DesignerName != null)
+                {
+                    var weaponName = weapon.Value.DesignerName;
+                    if (!IsWeaponAllowed(weaponName))
+                    {
+                        weapon.Value.Remove();
+                    }
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -502,17 +523,42 @@ public class FlyingScoutsmanPlugin : BasePlugin
 
         try
         {
-            // Give SSG08 (Scout)
-            player.GiveNamedItem(CsItem.SSG08);
+            var weaponServices = player.PlayerPawn.Value.WeaponServices;
+            if (weaponServices == null) return;
+
+            // Check if player already has SSG08
+            bool hasSSG08 = false;
+            bool hasKnife = false;
             
-            // Give appropriate knife based on team
-            if (player.Team == CsTeam.Terrorist)
+            foreach (var weapon in weaponServices.MyWeapons)
             {
-                player.GiveNamedItem(CsItem.DefaultKnifeT);
+                if (weapon?.Value?.DesignerName != null)
+                {
+                    var weaponName = weapon.Value.DesignerName;
+                    if (weaponName == "weapon_ssg08")
+                        hasSSG08 = true;
+                    else if (weaponName.Contains("knife"))
+                        hasKnife = true;
+                }
             }
-            else if (player.Team == CsTeam.CounterTerrorist)
+            
+            // Only give weapons if player doesn't already have them
+            if (!hasSSG08)
             {
-                player.GiveNamedItem(CsItem.DefaultKnifeCT);
+                player.GiveNamedItem(CsItem.SSG08);
+            }
+            
+            if (!hasKnife)
+            {
+                // Give appropriate knife based on team
+                if (player.Team == CsTeam.Terrorist)
+                {
+                    player.GiveNamedItem(CsItem.DefaultKnifeT);
+                }
+                else if (player.Team == CsTeam.CounterTerrorist)
+                {
+                    player.GiveNamedItem(CsItem.DefaultKnifeCT);
+                }
             }
             
             Logger.LogDebug($"Flying Scoutsman: Gave allowed weapons to {player.PlayerName}");
@@ -527,9 +573,24 @@ public class FlyingScoutsmanPlugin : BasePlugin
     {
         var allowedWeapons = new[]
         {
-            "weapon_ssg08",     // SSG08 Scout
-            "weapon_knife",     // CT Knife
-            "weapon_knife_t"    // T Knife
+            "weapon_ssg08",         // SSG08 Scout
+            "weapon_knife",         // CT Knife
+            "weapon_knife_t",       // T Knife
+            "weapon_knife_ct",      // CT Knife (alternative)
+            "weapon_knifegg",       // Golden knife
+            "weapon_knife_flip",    // Flip knife
+            "weapon_knife_gut",     // Gut knife
+            "weapon_knife_karambit", // Karambit
+            "weapon_knife_m9_bayonet", // M9 Bayonet
+            "weapon_knife_tactical", // Tactical knife
+            "weapon_knife_falchion", // Falchion knife
+            "weapon_knife_survival_bowie", // Bowie knife
+            "weapon_knife_butterfly", // Butterfly knife
+            "weapon_knife_push",    // Shadow daggers
+            "weapon_knife_ursus",   // Ursus knife
+            "weapon_knife_gypsy_jackknife", // Navaja knife
+            "weapon_knife_stiletto", // Stiletto knife
+            "weapon_knife_widowmaker" // Talon knife
         };
         
         return allowedWeapons.Contains(weaponName);
