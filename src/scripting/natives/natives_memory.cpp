@@ -377,6 +377,20 @@ void RemoveAllNetworkVectorElements(ScriptContext& script_context)
     vec->RemoveAll();
 }
 
+void RemoveNetworkVectorElement(ScriptContext& script_context)
+{
+    auto vec = script_context.GetArgument<CUtlVector<CEntityHandle>*>(0);
+    auto index = script_context.GetArgument<int>(1);
+
+    if (index < 0 || index >= vec->Count())
+    {
+        script_context.ThrowNativeError("Index %d out of range (size: %d)", index, vec->Count());
+        return;
+    }
+
+    vec->Remove(index);
+}
+
 REGISTER_NATIVES(memory, {
     ScriptEngine::RegisterNativeHandler("CREATE_VIRTUAL_FUNCTION", CreateVirtualFunction);
     ScriptEngine::RegisterNativeHandler("CREATE_VIRTUAL_FUNCTION_BY_SIGNATURE", CreateVirtualFunctionBySignature);
@@ -390,5 +404,6 @@ REGISTER_NATIVES(memory, {
     ScriptEngine::RegisterNativeHandler("GET_NETWORK_VECTOR_SIZE", GetNetworkVectorSize);
     ScriptEngine::RegisterNativeHandler("GET_NETWORK_VECTOR_ELEMENT_AT", GetNetworkVectorElementAt);
     ScriptEngine::RegisterNativeHandler("REMOVE_ALL_NETWORK_VECTOR_ELEMENTS", RemoveAllNetworkVectorElements);
+    ScriptEngine::RegisterNativeHandler("REMOVE_NETWORK_VECTOR_ELEMENT", RemoveNetworkVectorElement);
 })
 } // namespace counterstrikesharp

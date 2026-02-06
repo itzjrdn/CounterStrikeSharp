@@ -10,3 +10,4 @@ FIND_VIRTUAL_TABLE: modulePath:string, vtablename:string -> pointer
 GET_NETWORK_VECTOR_SIZE: vec:pointer -> int
 GET_NETWORK_VECTOR_ELEMENT_AT: vec:pointer, index:int -> pointer
 REMOVE_ALL_NETWORK_VECTOR_ELEMENTS: vec:pointer -> void
+REMOVE_NETWORK_VECTOR_ELEMENT: vec:pointer, index:int -> void
