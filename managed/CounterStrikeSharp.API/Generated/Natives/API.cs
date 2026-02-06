@@ -1592,6 +1592,17 @@ namespace CounterStrikeSharp.API.Core
 			}
 		}
 
+        public static void RemoveNetworkVectorElement(IntPtr vec, int index){
+			lock (ScriptContext.GlobalScriptContext.Lock) {
+			ScriptContext.GlobalScriptContext.Reset();
+			ScriptContext.GlobalScriptContext.Push(vec);
+			ScriptContext.GlobalScriptContext.Push(index);
+			ScriptContext.GlobalScriptContext.SetIdentifier(0xC7CCF705);
+			ScriptContext.GlobalScriptContext.Invoke();
+			ScriptContext.GlobalScriptContext.CheckErrors();
+			}
+		}
+
         public static IntPtr MetaFactory(string interfacename){
 			lock (ScriptContext.GlobalScriptContext.Lock) {
 			ScriptContext.GlobalScriptContext.Reset();

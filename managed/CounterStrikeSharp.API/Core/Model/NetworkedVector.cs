@@ -38,6 +38,11 @@ public partial class NetworkedVector<T> : NativeObject, IReadOnlyCollection<T>
         NativeAPI.RemoveAllNetworkVectorElements(Handle);
     }
 
+    public void RemoveAt(int index)
+    {
+        NativeAPI.RemoveNetworkVectorElement(Handle, index);
+    }
+
     public IEnumerator<T> GetEnumerator()
     {
         for (int i = 0; i < Count; i++)
